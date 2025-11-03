@@ -3,6 +3,7 @@
 #include "nix/store/globals.hh"
 #include "nix/store/store-open.hh"
 #include "nix/util/experimental-features.hh"
+#include "nix/util/util.hh"
 
 #include <algorithm>
 
@@ -47,14 +48,31 @@ bool Machine::systemSupported(const std::string & system) const
 bool Machine::allSupported(const StringSet & features) const
 {
     return std::all_of(features.begin(), features.end(), [&](const std::string & feature) {
-        return supportedFeatures.count(feature) || mandatoryFeatures.count(feature);
+        // Extract feature name without quantity (e.g., "mem:32" -> "mem")
+        auto colonPos = feature.find(':');
+        std::string featureName = (colonPos != std::string::npos) ? feature.substr(0, colonPos) : feature;
+        return supportedFeatures.count(featureName) || mandatoryFeatures.count(featureName);
     });
 }
 
 bool Machine::mandatoryMet(const StringSet & features) const
 {
     return std::all_of(mandatoryFeatures.begin(), mandatoryFeatures.end(), [&](const std::string & feature) {
-        return features.count(feature);
+        // Extract feature name without quantity
+        auto colonPos = feature.find(':');
+        std::string featureName = (colonPos != std::string::npos) ? feature.substr(0, colonPos) : feature;
+        
+        // Check if the feature (without quantity) is in the required features
+        bool found = false;
+        for (const auto & reqFeature : features) {
+            auto reqColonPos = reqFeature.find(':');
+            std::string reqFeatureName = (reqColonPos != std::string::npos) ? reqFeature.substr(0, reqColonPos) : reqFeature;
+            if (reqFeatureName == featureName) {
+                found = true;
+                break;
+            }
+        }
+        return found;
     });
 }
 

@@ -18,6 +18,7 @@
 #include "nix/store/build-result.hh"
 #include "nix/store/store-open.hh"
 #include "nix/util/strings.hh"
+#include "nix/util/util.hh"
 #include "nix/store/derivations.hh"
 #include "nix/store/local-store.hh"
 #include "nix/cmd/legacy.hh"
