@@ -24,6 +24,14 @@ struct Machine
     const StringSet mandatoryFeatures;
     const std::string sshPublicHostKey;
     bool enabled = true;
+    
+    /**
+     * Resource quantities for supported and mandatory features.
+     * Maps feature name (e.g., "mem", "gpu") to available quantity.
+     * Only populated when resource-management experimental feature is enabled.
+     */
+    std::map<std::string, unsigned int> supportedFeatureQuantities;
+    std::map<std::string, unsigned int> mandatoryFeatureQuantities;
 
     /**
      * @return Whether `system` is either `"builtin"` or in

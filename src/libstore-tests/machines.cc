@@ -211,3 +211,56 @@ TEST(machines, getMachinesWithCorrectFileReferenceToIncorrectFile)
             {}, "@" + std::filesystem::weakly_canonical(getUnitTestData() / "machines" / "bad_format").string()),
         FormatError);
 }
+
+TEST(machines, getMachinesWithResourceQuantities)
+{
+    auto actual = Machine::parseConfig(
+        {},
+        "nix@gpu-node.example.com x86_64-linux - 32 1 gpu:2,mem:128 - -");
+    ASSERT_THAT(actual, SizeIs(1));
+    EXPECT_THAT(actual[0], Field(&Machine::storeUri, AuthorityMatches("nix@gpu-node.example.com")));
+    EXPECT_THAT(actual[0], Field(&Machine::systemTypes, ElementsAre("x86_64-linux")));
+    EXPECT_THAT(actual[0], Field(&Machine::maxJobs, Eq(32)));
+    EXPECT_THAT(actual[0], Field(&Machine::speedFactor, Eq(1)));
+    EXPECT_THAT(actual[0], Field(&Machine::supportedFeatures, ElementsAre("gpu", "mem")));
+    EXPECT_THAT(actual[0], Field(&Machine::mandatoryFeatures, SizeIs(0)));
+    
+    // Check resource quantities
+    EXPECT_EQ(actual[0].supportedFeatureQuantities.at("gpu"), 2);
+    EXPECT_EQ(actual[0].supportedFeatureQuantities.at("mem"), 128);
+}
+
+TEST(machines, getMachinesWithResourceQuantitiesInMandatoryFeatures)
+{
+    auto actual = Machine::parseConfig(
+        {},
+        "nix@builder.example.com x86_64-linux - 8 1 kvm cpu:16 mem:64 -");
+    ASSERT_THAT(actual, SizeIs(1));
+    EXPECT_THAT(actual[0], Field(&Machine::supportedFeatures, ElementsAre("cpu", "kvm")));
+    EXPECT_THAT(actual[0], Field(&Machine::mandatoryFeatures, ElementsAre("mem")));
+    
+    // Check resource quantities
+    EXPECT_EQ(actual[0].supportedFeatureQuantities.at("cpu"), 16);
+    EXPECT_EQ(actual[0].mandatoryFeatureQuantities.at("mem"), 64);
+}
+
+TEST(machines, getMachinesWithResourceQuantitiesMixedWithRegularFeatures)
+{
+    auto actual = Machine::parseConfig(
+        {},
+        "nix@builder.example.com x86_64-linux - 8 1 kvm,mem:64,benchmark - -");
+    ASSERT_THAT(actual, SizeIs(1));
+    EXPECT_THAT(actual[0], Field(&Machine::supportedFeatures, ElementsAre("benchmark", "kvm", "mem")));
+    
+    // Check resource quantities - only mem should have a quantity
+    EXPECT_EQ(actual[0].supportedFeatureQuantities.at("mem"), 64);
+    EXPECT_EQ(actual[0].supportedFeatureQuantities.count("kvm"), 0);
+    EXPECT_EQ(actual[0].supportedFeatureQuantities.count("benchmark"), 0);
+}
+
+TEST(machines, getMachinesWithInvalidResourceQuantity)
+{
+    EXPECT_THROW(
+        Machine::parseConfig({}, "nix@builder.example.com x86_64-linux - 8 1 mem:invalid - -"),
+        FormatError);
+}

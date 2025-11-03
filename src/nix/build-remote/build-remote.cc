@@ -37,6 +37,105 @@ std::string escapeUri(std::string uri)
 
 static std::string currentLoad;
 
+/**
+ * Open a lock file for a specific resource on a machine.
+ * Resource locks are used to track consumption of limited resources.
+ */
+static AutoCloseFD openResourceLock(const Machine & m, const std::string & resourceName, unsigned int slot)
+{
+    return openLockFile(
+        fmt("%s/%s-resource-%s-%d", currentLoad, escapeUri(m.storeUri.render()), resourceName, slot), true);
+}
+
+/**
+ * Parse required features to extract resource requirements.
+ * Returns a map of resource name to required quantity.
+ */
+static std::map<std::string, unsigned int> parseResourceRequirements(const StringSet & requiredFeatures)
+{
+    std::map<std::string, unsigned int> requirements;
+    
+    for (const auto & feature : requiredFeatures) {
+        auto colonPos = feature.find(':');
+        if (colonPos != std::string::npos) {
+            std::string resourceName = feature.substr(0, colonPos);
+            std::string quantityStr = feature.substr(colonPos + 1);
+            
+            auto quantity = string2Int<unsigned int>(quantityStr);
+            if (quantity) {
+                requirements[resourceName] = *quantity;
+            }
+        }
+    }
+    
+    return requirements;
+}
+
+/**
+ * Try to acquire resource locks for the given requirements.
+ * Returns a map of resource name to list of acquired lock FDs, or empty map if acquisition failed.
+ */
+static std::map<std::string, std::vector<AutoCloseFD>> tryAcquireResourceLocks(
+    const Machine & machine,
+    const std::map<std::string, unsigned int> & resourceRequirements)
+{
+    // Check if resource-management experimental feature is enabled
+    auto xpFeatures = settings.experimentalFeatures.get();
+    bool resourceManagementEnabled = false;
+    for (const auto & feature : xpFeatures) {
+        if (auto xpFeature = parseExperimentalFeature(feature)) {
+            if (*xpFeature == Xp::ResourceManagement) {
+                resourceManagementEnabled = true;
+                break;
+            }
+        }
+    }
+    
+    if (!resourceManagementEnabled) {
+        return {};  // Resource management not enabled, so no locks needed
+    }
+    
+    std::map<std::string, std::vector<AutoCloseFD>> acquiredLocks;
+    
+    // Try to acquire locks for each required resource
+    for (const auto & [resourceName, required] : resourceRequirements) {
+        // Find the available quantity from machine config
+        unsigned int available = 0;
+        auto supportedIt = machine.supportedFeatureQuantities.find(resourceName);
+        auto mandatoryIt = machine.mandatoryFeatureQuantities.find(resourceName);
+        
+        if (supportedIt != machine.supportedFeatureQuantities.end()) {
+            available = supportedIt->second;
+        } else if (mandatoryIt != machine.mandatoryFeatureQuantities.end()) {
+            available = mandatoryIt->second;
+        } else {
+            // Resource not defined on this machine
+            return {};
+        }
+        
+        // Try to acquire 'required' lock slots for this resource
+        std::vector<AutoCloseFD> resourceLocks;
+        unsigned int acquired = 0;
+        
+        for (unsigned int slot = 0; slot < available && acquired < required; ++slot) {
+            auto lock = openResourceLock(machine, resourceName, slot);
+            if (lockFile(lock.get(), ltWrite, false)) {
+                resourceLocks.push_back(std::move(lock));
+                acquired++;
+            }
+        }
+        
+        if (acquired < required) {
+            // Could not acquire enough locks for this resource
+            return {};
+        }
+        
+        acquiredLocks[resourceName] = std::move(resourceLocks);
+    }
+    
+    return acquiredLocks;
+}
+
 static AutoCloseFD openSlotLock(const Machine & m, uint64_t slot)
 {
     return openLockFile(fmt("%s/%s-%d", currentLoad, escapeUri(m.storeUri.render()), slot), true);
@@ -93,6 +192,7 @@ static int main_build_remote(int argc, char ** argv)
 
         std::shared_ptr<Store> sshStore;
         AutoCloseFD bestSlotLock;
+        std::map<std::string, std::vector<AutoCloseFD>> bestResourceLocks;
 
         auto machines = getMachines();
         debug("got %d remote builders", machines.size());
@@ -119,6 +219,9 @@ static int main_build_remote(int argc, char ** argv)
             auto neededSystem = readString(source);
             drvPath = store->parseStorePath(readString(source));
             auto requiredFeatures = readStrings<StringSet>(source);
+            
+            // Parse resource requirements from requiredFeatures
+            auto resourceRequirements = parseResourceRequirements(requiredFeatures);
 
             /* It would be possible to build locally after some builds clear out,
                so don't show the warning now: */
@@ -141,12 +244,38 @@ static int main_build_remote(int argc, char ** argv)
 
                 Machine * bestMachine = nullptr;
                 uint64_t bestLoad = 0;
+                std::map<std::string, unsigned int> bestMachineResourceRequirements;
                 for (auto & m : machines) {
                     debug("considering building on remote machine '%s'", m.storeUri.render());
 
                     if (m.enabled && m.systemSupported(neededSystem) && m.allSupported(requiredFeatures)
                         && m.mandatoryMet(requiredFeatures)) {
                         rightType = true;
+                        
+                        // Try to acquire resource locks first
+                        auto resourceLocks = tryAcquireResourceLocks(m, resourceRequirements);
+                        
+                        // For resource-managed builds, we need resource locks.
+                        // Empty resourceLocks map means either:
+                        // 1. Resource management is not enabled (OK), or
+                        // 2. Resource acquisition failed (not OK)
+                        bool needsResourceManagement = !resourceRequirements.empty();
+                        auto xpFeatures = settings.experimentalFeatures.get();
+                        bool resourceManagementEnabled = false;
+                        for (const auto & feature : xpFeatures) {
+                            if (auto xpFeature = parseExperimentalFeature(feature)) {
+                                if (*xpFeature == Xp::ResourceManagement) {
+                                    resourceManagementEnabled = true;
+                                    break;
+                                }
+                            }
+                        }
+                        
+                        if (needsResourceManagement && resourceManagementEnabled && resourceLocks.empty()) {
+                            // Resource acquisition failed
+                            continue;
+                        }
+                        
                         AutoCloseFD free;
                         uint64_t load = 0;
                         for (uint64_t slot = 0; slot < m.maxJobs; ++slot) {
@@ -180,6 +309,8 @@ static int main_build_remote(int argc, char ** argv)
                             bestLoad = load;
                             bestSlotLock = std::move(free);
                             bestMachine = &m;
+                            bestMachineResourceRequirements = resourceRequirements;
+                            bestResourceLocks = std::move(resourceLocks);
                         }
                     }
                 }
@@ -253,6 +384,9 @@ static int main_build_remote(int argc, char ** argv)
         assert(sshStore);
 
         std::cerr << "# accept\n" << storeUri << "\n";
+        
+        // Resource locks in bestResourceLocks will be held until this process exits,
+        // ensuring resources remain allocated for the duration of the build
 
         auto inputs = readStrings<PathSet>(source);
         auto wantedOutputs = readStrings<StringSet>(source);

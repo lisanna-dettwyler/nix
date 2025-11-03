@@ -2,6 +2,7 @@
 #include "nix/store/machines.hh"
 #include "nix/store/globals.hh"
 #include "nix/store/store-open.hh"
+#include "nix/util/experimental-features.hh"
 
 #include <algorithm>
 
@@ -128,6 +129,49 @@ static std::vector<std::string> expandBuilderLines(const std::string & builders)
     return result;
 }
 
+/**
+ * Parse a feature string that may contain a resource quantity (e.g., "mem:32", "gpu:2").
+ * Returns a pair of (feature_name, quantity). If no quantity is specified, quantity is 0.
+ */
+static std::pair<std::string, unsigned int> parseFeatureWithQuantity(const std::string & feature)
+{
+    auto colonPos = feature.find(':');
+    if (colonPos == std::string::npos) {
+        return {feature, 0};
+    }
+    
+    std::string featureName = feature.substr(0, colonPos);
+    std::string quantityStr = feature.substr(colonPos + 1);
+    
+    auto quantity = string2Int<unsigned int>(quantityStr);
+    if (!quantity) {
+        throw FormatError("invalid resource quantity in feature '%s'", feature);
+    }
+    
+    return {featureName, *quantity};
+}
+
+/**
+ * Parse a set of features, extracting resource quantities when present.
+ * Returns a pair of (features without quantities, map of feature name to quantity).
+ */
+static std::pair<StringSet, std::map<std::string, unsigned int>>
+parseFeaturesWithQuantities(const StringSet & features)
+{
+    StringSet featureNames;
+    std::map<std::string, unsigned int> quantities;
+    
+    for (const auto & feature : features) {
+        auto [name, quantity] = parseFeatureWithQuantity(feature);
+        featureNames.insert(name);
+        if (quantity > 0) {
+            quantities[name] = quantity;
+        }
+    }
+    
+    return {featureNames, quantities};
+}
+
 static Machine parseBuilderLine(const StringSet & defaultSystems, const std::string & line)
 {
     const auto tokens = tokenizeString<std::vector<std::string>>(line);
@@ -171,9 +215,16 @@ static Machine parseBuilderLine(const StringSet & defaultSystems, const std::str
         throw FormatError(
             "bad machine specification: store URL was not found at the first column of a row: '%s'", line);
 
+    // Parse features with potential resource quantities
+    auto rawSupportedFeatures = isSet(5) ? tokenizeString<StringSet>(tokens[5], ",") : StringSet{};
+    auto rawMandatoryFeatures = isSet(6) ? tokenizeString<StringSet>(tokens[6], ",") : StringSet{};
+    
+    auto [supportedFeatures, supportedQuantities] = parseFeaturesWithQuantities(rawSupportedFeatures);
+    auto [mandatoryFeatures, mandatoryQuantities] = parseFeaturesWithQuantities(rawMandatoryFeatures);
+
     // TODO use designated initializers, once C++ supports those with
     // custom constructors.
-    return {
+    Machine machine{
         // `storeUri`
         tokens[0],
         // `systemTypes`
@@ -185,11 +236,16 @@ static Machine parseBuilderLine(const StringSet & defaultSystems, const std::str
         // `speedFactor`
         isSet(4) ? parseFloatField(4) : 1.0f,
         // `supportedFeatures`
-        isSet(5) ? tokenizeString<StringSet>(tokens[5], ",") : StringSet{},
+        supportedFeatures,
         // `mandatoryFeatures`
-        isSet(6) ? tokenizeString<StringSet>(tokens[6], ",") : StringSet{},
+        mandatoryFeatures,
         // `sshPublicHostKey`
         isSet(7) ? ensureBase64(7) : ""};
+    
+    machine.supportedFeatureQuantities = supportedQuantities;
+    machine.mandatoryFeatureQuantities = mandatoryQuantities;
+    
+    return machine;
 }
 
 static Machines parseBuilderLines(const StringSet & defaultSystems, const std::vector<std::string> & builders)

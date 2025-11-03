@@ -25,7 +25,7 @@ struct ExperimentalFeatureDetails
  * feature, we either have no issue at all if few features are not added
  * at the end of the list, or a proper merge conflict if they are.
  */
-constexpr size_t numXpFeatures = 1 + static_cast<size_t>(Xp::BLAKE3Hashes);
+constexpr size_t numXpFeatures = 1 + static_cast<size_t>(Xp::ResourceManagement);
 
 constexpr std::array<ExperimentalFeatureDetails, numXpFeatures> xpFeatureDetails = {{
     {
@@ -318,6 +318,34 @@ constexpr std::array<ExperimentalFeatureDetails, numXpFeatures> xpFeatureDetails
         .name = "blake3-hashes",
         .description = R"(
             Enables support for BLAKE3 hashes.
+        )",
+        .trackingUrl = "",
+    },
+    {
+        .tag = Xp::ResourceManagement,
+        .name = "resource-management",
+        .description = R"(
+            Enables a basic resource management scheme for system features.
+            
+            This allows remote build machines to specify limited quantities of
+            resources (like memory or GPUs) that can be temporarily consumed by builds.
+            
+            Resource management is supported in both the supported features and mandatory
+            features of a remote machine configuration, by appending a colon `:` to a feature
+            name followed by the quantity that this machine has. A derivation specifies that
+            it consumes a resource with the same notation in the `requiredSystemFeatures` attribute.
+            
+            For example, this builder can provide exclusive access to two GPUs and 128G of memory:
+            
+            ```
+            builders = ssh://gpu-node x86_64-linux - 32 1 gpu:2,mem:128
+            ```
+            
+            A derivation that might use this machine may set its `requiredSystemFeatures` to
+            `["gpu:1" "mem:4"]` to indicate that it requires a GPU and consumes 4G of system memory.
+            
+            Note that Nix does not do any actual delegation or enforcement of GPU, memory, or other
+            resource usage, that is up to the derivations to manage.
         )",
         .trackingUrl = "",
     },
