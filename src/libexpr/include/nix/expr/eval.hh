@@ -241,7 +241,7 @@ struct StaticEvalSymbols
         line, column, functor, toString, right, wrong, structuredAttrs, json, allowedReferences, allowedRequisites,
         disallowedReferences, disallowedRequisites, maxSize, maxClosureSize, builder, args, contentAddressed, impure,
         outputHash, outputHashAlgo, outputHashMode, recurseForDerivations, description, self, epsilon, startSet,
-        operator_, key, path, prefix, outputSpecified, __meta;
+        operator_, key, path, prefix, outputSpecified, __meta, requiredSystemFeatures;
 
     Expr::AstSymbols exprSymbols;
 
@@ -295,6 +295,7 @@ struct StaticEvalSymbols
             .prefix = alloc.create("prefix"),
             .outputSpecified = alloc.create("outputSpecified"),
             .__meta = alloc.create("__meta"),
+            .requiredSystemFeatures = alloc.create("requiredSystemFeatures"),
             .exprSymbols = {
                 .sub = alloc.create("__sub"),
                 .lessThan = alloc.create("__lessThan"),
