@@ -8,7 +8,11 @@
 
 namespace nix::daemon {
 
-enum RecursiveFlag : bool { NotRecursive = false, Recursive = true };
+enum struct RecursiveFlag {
+    NotRecursive = 0,
+    Recursive = 1,
+    RecursiveSubmitted = 2,
+};
 
 /**
  * Serve a client on the given file descriptors.
