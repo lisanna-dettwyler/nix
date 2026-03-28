@@ -271,7 +271,7 @@ public:
      */
     bool tryBuildHook = true;
 
-    std::counting_semaphore<0> asyncPostBuildHookSlots;
+    std::counting_semaphore<1> asyncPostBuildHookSlots;
     std::vector<std::unique_ptr<AsyncPostBuildHookState>> asyncPostBuildHooks;
 
     Worker(Store & store, Store & evalStore);

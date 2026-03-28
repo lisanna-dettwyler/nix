@@ -355,7 +355,7 @@ void Worker::run(const Goals & _topGoals)
                 [&](auto & state) {
                     if (state->ready) {
                         state->complete();
-                        asyncPostBuildHookSlots.release();
+                        // asyncPostBuildHookSlots.release();
                         return true;
                     }
                     return false;
@@ -564,7 +564,7 @@ bool Worker::pathContentsGood(const StorePath & path)
 void Worker::acquireAsyncPostBuildHookSlot()
 {
     Activity act(*logger, lvlWarn, actPostBuildHook, "waiting for async-post-build-hook slot");
-    asyncPostBuildHookSlots.acquire();
+    // asyncPostBuildHookSlots.acquire();
 }
 
 void Worker::markContentsGood(const StorePath & path)
