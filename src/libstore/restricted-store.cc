@@ -2,10 +2,12 @@
 #include "nix/store/build.hh"
 #include "nix/store/build-result.hh"
 #include "nix/store/build/worker.hh"
+#include "nix/store/submit-store.hh"
 #include "nix/util/callback.hh"
 #include "nix/store/realisation.hh"
 #include "nix/store/local-store.hh"
 #include "nix/util/error.hh"
+#include "nix/util/repair-flag.hh"
 
 namespace nix {
 
@@ -41,7 +43,7 @@ bool RestrictionContext::isAllowed(const DerivedPath & req)
  * paths that are in the input closures of the build or were added via
  * recursive Nix calls.
  */
-struct RestrictedStore : public virtual IndirectRootStore, public virtual GcStore
+struct RestrictedStore : public virtual IndirectRootStore, public virtual GcStore, public virtual SubmitStore
 {
 private:
     void anchor() override;
@@ -113,6 +115,13 @@ public:
     void narFromPath(const StorePath & path, Sink & sink) override;
 
     void registerDrvOutput(const Realisation & info) override;
+
+    ref<const ValidPathInfo> addToStoreScanning(
+        Source & dump,
+        std::string_view name,
+        FileSerialisationMethod dumpMethod,
+        ContentAddressMethod hashMethod,
+        HashAlgorithm hashAlgo) override;
 
     void queryRealisationUncached(
         const DrvOutput & id, Callback<std::shared_ptr<const UnkeyedRealisation>> callback) noexcept override;
@@ -273,6 +282,19 @@ void RestrictedStore::registerDrvOutput(const Realisation & info)
 // corresponds to an allowed derivation
 {
     throw Error("registerDrvOutput");
+}
+
+ref<const ValidPathInfo> RestrictedStore::addToStoreScanning(
+    Source & dump,
+    std::string_view name,
+    FileSerialisationMethod dumpMethod,
+    ContentAddressMethod hashMethod,
+    HashAlgorithm hashAlgo)
+{
+    auto path = next->addToStoreFromDump(
+        dump, name, dumpMethod, hashMethod, hashAlgo, queryAllValidPaths(), RepairFlag::NoRepair, nullptr, true);
+
+    return queryPathInfo(path);
 }
 
 void RestrictedStore::queryRealisationUncached(
