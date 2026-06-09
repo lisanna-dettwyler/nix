@@ -87,6 +87,8 @@ private:
         size_t suspensions = 0;
         bool haveUpdate = true;
 
+        char progressChar = '-';
+
         bool isPaused() const
         {
             return suspensions > 0;
@@ -358,8 +360,8 @@ public:
                 info.lastLine = lastLine;
                 state->activities.emplace_back(info);
                 i->second = std::prev(state->activities.end());
-                update(*state);
             }
+            update(*state);
         }
 
         else if (type == resUntrustedPath) {
@@ -452,7 +454,16 @@ public:
         if (state.isPaused() || !state.active)
             return nextWakeup;
 
-        std::string line;
+        if (state.progressChar == '-')
+            state.progressChar = '\\';
+        else if (state.progressChar == '\\')
+            state.progressChar = '|';
+        else if (state.progressChar == '|')
+            state.progressChar = '/';
+        else if (state.progressChar == '/')
+            state.progressChar = '-';
+
+        std::string line = fmt("%c ", state.progressChar);
 
         std::string status = getStatus(state);
         if (!status.empty()) {
