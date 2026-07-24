@@ -76,7 +76,7 @@ HookInstance::HookInstance()
 
     /* Give custom build hooks the chance to cleanup. */
     pid.setKillSignal(SIGTERM);
-    pid.setKillTimeout(500ms);
+    pid.setKillTimeout(20s);
 
     pid.setSeparatePG(true);
     fromHook.writeSide = -1;
