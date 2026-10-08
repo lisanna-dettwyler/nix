@@ -345,6 +345,7 @@ sources = files(
   'local-store-active-builds.cc',
   'local-store.cc',
   'log-store.cc',
+  'machine-selection.cc',
   'machines.cc',
   'make-content-addressed.cc',
   'misc.cc',
