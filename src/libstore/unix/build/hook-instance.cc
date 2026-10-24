@@ -8,7 +8,37 @@ using namespace std::chrono_literals;
 
 namespace nix {
 
-HookInstance::HookInstance(const Strings & _buildHook)
+HookInstance::HookInstance()
+{
+    /* Create a pipe to get the output of the child. */
+    fromHook.create();
+
+    /* Create the communication pipes. */
+    toHook.create();
+
+    /* Create a pipe to get the output of the builder. */
+    builderOut.create();
+}
+
+void HookInstance::adopt(pid_t childPid, std::chrono::milliseconds timeout)
+{
+    pid = childPid;
+
+    /* Give custom build hooks the chance to cleanup. */
+    /* The hook exits by itself when it sees EOF on its stdin, so on
+       teardown, give it a chance to do so (e.g. to export its
+       telemetry) instead of signalling it right away. */
+    pid.setKillSignal(0);
+    pid.setKillTimeout(timeout);
+
+    pid.setSeparatePG(true);
+    fromHook.writeSide = -1;
+    toHook.readSide = -1;
+
+    sink = FdSink(toHook.writeSide.get());
+}
+
+std::unique_ptr<HookInstance> HookInstance::external(const Strings & _buildHook, std::chrono::milliseconds timeout)
 {
     debug("starting build hook '%s'", concatStringsSep(" ", _buildHook));
 
@@ -35,14 +65,7 @@ HookInstance::HookInstance(const Strings & _buildHook)
 
     args.push_back(std::to_string(verbosity));
 
-    /* Create a pipe to get the output of the child. */
-    fromHook.create();
-
-    /* Create the communication pipes. */
-    toHook.create();
-
-    /* Create a pipe to get the output of the builder. */
-    builderOut.create();
+    auto hook = std::unique_ptr<HookInstance>(new HookInstance());
 
     /* Propagate our trace context to the hook, so that its trace (and,
        through it, the remote builder's) is part of ours. Note: this
@@ -51,8 +74,8 @@ HookInstance::HookInstance(const Strings & _buildHook)
     auto traceContext = logger->getTraceContext(getCurActivity());
 
     /* Fork the hook. */
-    pid = startProcess([&]() {
-        if (dup2(fromHook.writeSide.get(), STDERR_FILENO) == -1)
+    Pid childPid = startProcess([&]() {
+        if (dup2(hook->fromHook.writeSide.get(), STDERR_FILENO) == -1)
             throw SysError("cannot pipe standard error into log file");
 
         commonChildInit();
@@ -65,16 +88,16 @@ HookInstance::HookInstance(const Strings & _buildHook)
             throw SysError("changing into /");
 
         /* Dup the communication pipes. */
-        if (dup2(toHook.readSide.get(), STDIN_FILENO) == -1)
+        if (dup2(hook->toHook.readSide.get(), STDIN_FILENO) == -1)
             throw SysError("dupping to-hook read side");
 
         /* Use fd 4 for the builder's stdout/stderr. */
-        if (dup2(builderOut.writeSide.get(), 4) == -1)
+        if (dup2(hook->builderOut.writeSide.get(), 4) == -1)
             throw SysError("dupping builder's stdout/stderr");
 
         /* Hack: pass the read side of that fd to allow build-remote
            to read SSH error messages. */
-        if (dup2(builderOut.readSide.get(), 5) == -1)
+        if (dup2(hook->builderOut.readSide.get(), 5) == -1)
             throw SysError("dupping builder's stdout/stderr");
 
         execv(buildHook.native().c_str(), stringsToCharPtrs(args).data());
@@ -82,23 +105,15 @@ HookInstance::HookInstance(const Strings & _buildHook)
         throw SysError("executing %s", PathFmt(buildHook));
     });
 
-    /* Give custom build hooks the chance to cleanup. */
-    /* The hook exits by itself when it sees EOF on its stdin, so on
-       teardown, give it a chance to do so (e.g. to export its
-       telemetry) instead of signalling it right away. */
-    pid.setKillSignal(0);
-    pid.setKillTimeout(10s);
+    hook->adopt(childPid.release(), timeout);
 
-    pid.setSeparatePG(true);
-    fromHook.writeSide = -1;
-    toHook.readSide = -1;
+    std::map<std::string, Config::SettingInfo> settingsToSend;
+    globalConfig.getSettings(settingsToSend);
+    for (auto & setting : settingsToSend)
+        hook->sink << 1 << setting.first << setting.second.value;
+    hook->sink << 0;
 
-    sink = FdSink(toHook.writeSide.get());
-    std::map<std::string, Config::SettingInfo> settings;
-    globalConfig.getSettings(settings);
-    for (auto & setting : settings)
-        sink << 1 << setting.first << setting.second.value;
-    sink << 0;
+    return hook;
 }
 
 HookInstance::~HookInstance()

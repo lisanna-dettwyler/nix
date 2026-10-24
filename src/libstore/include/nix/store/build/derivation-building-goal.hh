@@ -96,7 +96,12 @@ private:
     /**
      * Is the build hook willing to perform the build?
      */
-    HookReply tryBuildHook(const DerivationOptions<StorePath> & drvOptions);
+    Co<HookReply> tryBuildHook(const DerivationOptions<StorePath> & drvOptions);
+
+#ifndef _WIN32
+    std::unique_ptr<HookInstance> hookAccepted;
+    std::string hookMachineName;
+#endif
 
     Done doneFailureLogTooLong(BuildLog & buildLog);
 

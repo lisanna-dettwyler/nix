@@ -5,7 +5,9 @@
 #include "nix/util/serialise.hh"
 #include "nix/util/processes.hh"
 
+#include <chrono>
 #include <functional>
+#include <memory>
 
 namespace nix {
 
@@ -14,8 +16,8 @@ namespace nix {
  * owned by a `Goal`. This is for efficiency: rather than starting the
  * hook every time we want to ask whether we can run a remote build
  * (which can be very often), we reuse a hook process for answering
- * those queries until it accepts a build.  So if there are N
- * derivations to be built, at most N hooks will be started.
+ * those queries until it accepts a build. One goal at a time asks it;
+ * others wait in `Worker::wantingHook`.
  */
 struct HookInstance
 {
@@ -39,18 +41,11 @@ struct HookInstance
      */
     Pid pid;
 
-    /**
-     * The remote machine on which we're building.
-     *
-     * @Invariant When the hook instance is owned by the `Worker`, this
-     * is the empty string. When it is owned by a `Goal`, this should be
-     * set.
-     */
-    std::string machineName;
-
     FdSink sink;
 
     std::map<ActivityId, Activity> activities;
+
+    std::string partialLine;
 
     /**
      * Callback to run when the hook process is killed in the destructor.
@@ -58,9 +53,20 @@ struct HookInstance
      */
     std::function<void()> onKillChild;
 
-    HookInstance(const Strings & buildHook);
+    /**
+     * Start the configured `build-hook` program. `timeout` is how long
+     * the destructor waits for it to exit by itself (after EOF on its
+     * stdin) before sending SIGKILL.
+     */
+    static std::unique_ptr<HookInstance> external(const Strings & buildHook, std::chrono::milliseconds timeout);
 
     ~HookInstance();
+
+private:
+
+    HookInstance();
+
+    void adopt(pid_t childPid, std::chrono::milliseconds timeout);
 };
 
 } // namespace nix
