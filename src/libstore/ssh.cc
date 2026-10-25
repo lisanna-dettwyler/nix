@@ -277,12 +277,13 @@ SSHMaster::startCommand(OsStrings && command, OsStrings && extraSshArgs, bool aw
 
     /* Without real SSH, the child *is* the remote program (e.g.
        `nix-daemon --stdio`), rather than an `ssh` client that we can
-       kill without affecting the remote side. So on teardown, give
-       it a chance to exit by itself after it sees EOF on its stdin,
-       e.g. to export its telemetry, instead of killing it right
-       away. */
+       kill without affecting the remote side. So on teardown, send it
+       SIGTERM (which the daemon handles as an interrupt, so it stops
+       its build, which nothing else does on macOS) and give it a
+       chance to exit by itself, e.g. to export its telemetry, instead
+       of killing it right away. */
     if (fakeSSH) {
-        conn->sshPid.setKillSignal(0);
+        conn->sshPid.setKillSignal(SIGTERM);
         conn->sshPid.setKillTimeout(std::chrono::seconds(10));
     }
 
