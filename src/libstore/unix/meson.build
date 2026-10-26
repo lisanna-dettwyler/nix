@@ -5,6 +5,7 @@ sources += files(
   'build/derivation-builder.cc',
   'build/external-derivation-builder.cc',
   'build/hook-instance.cc',
+  'build/remote-machine-build.cc',
   'build/wasi-derivation-builder.cc',
   'pathlocks.cc',
   'user-lock.cc',

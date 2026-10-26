@@ -10,6 +10,7 @@
 #include "nix/store/pathlocks.hh"
 #include "nix/store/build/goal.hh"
 #include "nix/store/build/build-log.hh"
+#include "nix/store/machine-selection.hh"
 
 namespace nix {
 
@@ -96,11 +97,40 @@ private:
     /**
      * Is the build hook willing to perform the build?
      */
-    Co<HookReply> tryBuildHook(const DerivationOptions<StorePath> & drvOptions);
+    Co tryBuildHook(const DerivationOptions<StorePath> & drvOptions, HookReply & reply);
 
 #ifndef _WIN32
     std::unique_ptr<HookInstance> hookAccepted;
     std::string hookMachineName;
+
+    /** Skipped by this build only. Shared with the coroutine, which can outlive the goal. */
+    std::shared_ptr<std::set<const Machine *>> unreachableMachines = std::make_shared<std::set<const Machine *>>();
+#endif
+
+    /** `machine` is the reserved slot, empty when the hook program answered. */
+    struct RemoteReply
+    {
+        HookReply reply = rpDecline;
+        std::optional<AcquiredMachine> machine;
+    };
+
+    /** Asks the hook program if `build-hook` is not the default, else the worker's own remote builder. */
+    Co tryRemoteBuilder(const DerivationOptions<StorePath> & drvOptions, RemoteReply & reply);
+
+#ifndef _WIN32
+    RemoteReply selectRemoteMachine(const DerivationOptions<StorePath> & drvOptions);
+
+    /**
+     * Build on `machine` in this process. Ends the goal, except when no
+     * machine could be reached: then it sets `retry` and returns.
+     */
+    Co buildRemotely(
+        AcquiredMachine machine,
+        const DerivationOptions<StorePath> & drvOptions,
+        const StorePathSet & inputPaths,
+        std::map<std::string, InitialOutput> & initialOutputs,
+        PathLocks outputLocks,
+        bool & retry);
 #endif
 
     Done doneFailureLogTooLong(BuildLog & buildLog);
