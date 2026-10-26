@@ -97,6 +97,10 @@ sources = files(
 
 include_dirs = [ include_directories('.') ]
 
+# `worker-protocol.cc` runs a stackful coroutine; Boost is not in the
+# `nix-store` pkg-config file, so link Boost.Context here.
+boost_context = dependency('boost', modules : [ 'context' ], include_type : 'system')
+deps_other += boost_context
 
 this_exe = executable(
   meson.project_name(),
