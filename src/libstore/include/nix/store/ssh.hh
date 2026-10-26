@@ -6,6 +6,7 @@
 #include "nix/util/url.hh"
 #include "nix/util/processes.hh"
 #include "nix/util/file-system.hh"
+#include "nix/util/logging.hh"
 
 namespace nix {
 
@@ -25,6 +26,7 @@ private:
     const std::string sshPublicHostKey;
     const bool useMaster;
     const bool compress;
+    const bool batchMode;
     const Descriptor logFD;
 
     /**
@@ -64,7 +66,8 @@ public:
         std::string_view sshPublicHostKey,
         bool useMaster,
         bool compress,
-        Descriptor logFD = INVALID_DESCRIPTOR);
+        Descriptor logFD = INVALID_DESCRIPTOR,
+        bool batchMode = false);
 
     struct Connection
     {
@@ -72,6 +75,13 @@ public:
         Pid sshPid;
 #endif
         AutoCloseFD out, in;
+
+        /**
+         * If set, the caller must first read ssh's `started` line from `out`, then drop `loggerSuspension`.
+         */
+        bool startedLinePending = false;
+
+        std::unique_ptr<Logger::Suspension> loggerSuspension;
 
         /**
          * Try to set the buffer size in both directions to the
@@ -93,7 +103,8 @@ public:
      * execute). Will not be used when "fake SSHing" to the local
      * machine.
      */
-    std::unique_ptr<Connection> startCommand(OsStrings && command, OsStrings && extraSshArgs = {});
+    std::unique_ptr<Connection>
+    startCommand(OsStrings && command, OsStrings && extraSshArgs = {}, bool awaitStarted = true);
 };
 
 } // namespace nix

@@ -72,7 +72,8 @@ SSHMaster::SSHMaster(
     std::string_view sshPublicHostKey,
     bool useMaster,
     bool compress,
-    Descriptor logFD)
+    Descriptor logFD,
+    bool batchMode)
     : authority(authority)
     , hostnameAndUser([authority]() {
         std::ostringstream oss;
@@ -86,6 +87,7 @@ SSHMaster::SSHMaster(
     , sshPublicHostKey(parsePublicHostKey(authority.host, sshPublicHostKey))
     , useMaster(useMaster && !fakeSSH)
     , compress(compress)
+    , batchMode(batchMode)
     , logFD(logFD)
     , tmpDir(
           this->useMaster || !this->sshPublicHostKey.empty()
@@ -104,6 +106,15 @@ SSHMaster::SSHMaster(
 
 void SSHMaster::addCommonSSHOpts(OsStrings & args, std::optional<std::filesystem::path> socketPath)
 {
+    /* A prompt would stall the connection. Without multiplexing, every connection prints
+       `started`, so no blocking `ssh -O check` is needed. These go first because ssh keeps
+       an option's first value. */
+    if (batchMode) {
+        args.push_back(OS_STR("-oBatchMode=yes"));
+        args.push_back(OS_STR("-oControlMaster=no"));
+        args.push_back(OS_STR("-oControlPath=none"));
+    }
+
     auto sshArgs = getNixSshOpts();
     args.insert(args.end(), sshArgs.begin(), sshArgs.end());
 
@@ -158,7 +169,8 @@ Strings createSSHEnv()
     return r;
 }
 
-std::unique_ptr<SSHMaster::Connection> SSHMaster::startCommand(OsStrings && command, OsStrings && extraSshArgs)
+std::unique_ptr<SSHMaster::Connection>
+SSHMaster::startCommand(OsStrings && command, OsStrings && extraSshArgs, bool awaitStarted)
 {
 #ifdef _WIN32 // TODO re-enable on Windows, once we can start processes.
     throw UnimplementedError("cannot yet SSH on windows because spawning processes is not yet implemented");
@@ -174,7 +186,7 @@ std::unique_ptr<SSHMaster::Connection> SSHMaster::startCommand(OsStrings && comm
     options.dieWithParent = false;
 
     std::unique_ptr<Logger::Suspension> loggerSuspension;
-    if (!fakeSSH && !useMaster) {
+    if (!fakeSSH && !useMaster && !batchMode) {
         loggerSuspension = std::make_unique<Logger::Suspension>(logger->suspend());
     }
 
@@ -215,6 +227,13 @@ std::unique_ptr<SSHMaster::Connection> SSHMaster::startCommand(OsStrings && comm
 
             args.splice(args.end(), std::move(command));
             auto env = createSSHEnv();
+
+            /* Leave Ctrl-C and Ctrl-Z to the worker, which stops the
+               build cleanly: put the child in a new session so it has
+               no controlling terminal. */
+            if (batchMode && setsid() == -1)
+                throw SysError("creating a new session");
+
             nix::execvpe(args.begin()->c_str(), stringsToCharPtrs(args).data(), stringsToCharPtrs(env).data());
 
             // could not exec ssh/bash
@@ -222,21 +241,34 @@ std::unique_ptr<SSHMaster::Connection> SSHMaster::startCommand(OsStrings && comm
         },
         options);
 
+    /* Kill the whole group, so that a `ProxyCommand` does not keep the connection open. */
+    if (batchMode)
+        conn->sshPid.setSeparatePG(true);
+
     in.readSide = INVALID_DESCRIPTOR;
     out.writeSide = INVALID_DESCRIPTOR;
 
-    // Skip readLine when useMaster: SSH connects via master socket, or
-    // falls back to direct connection where LocalCommand is now a no-op.
-    if (!fakeSSH && !useMaster && !(socketPath && isMasterRunning(*socketPath))) {
-        std::string reply;
-        try {
-            reply = readLine(out.readSide.get());
-        } catch (EndOfFile & e) {
-        }
+    // Wait for the SSH connection to be established, so that we don't
+    // overwrite the password prompt with our progress bar. Skip
+    // readLine when useMaster: SSH connects via master socket, or
+    // falls back to direct connection where LocalCommand is now a
+    // no-op. In batch mode there is no master, so every connection
+    // prints `started`.
+    if (!fakeSSH && !useMaster && (batchMode || !(socketPath && isMasterRunning(*socketPath)))) {
+        if (!awaitStarted) {
+            conn->startedLinePending = true;
+            conn->loggerSuspension = std::move(loggerSuspension);
+        } else {
+            std::string reply;
+            try {
+                reply = readLine(out.readSide.get());
+            } catch (EndOfFile & e) {
+            }
 
-        if (reply != "started") {
-            printTalkative("SSH stdout first line: %s", reply);
-            throw Error("failed to start SSH connection to '%s'", authority.host);
+            if (reply != "started") {
+                printTalkative("SSH stdout first line: %s", reply);
+                throw Error("failed to start SSH connection to '%s'", authority.host);
+            }
         }
     }
 
