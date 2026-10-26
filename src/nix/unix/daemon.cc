@@ -467,8 +467,8 @@ static void daemonLoop(
 static void forwardStdioConnection(RemoteStore & store)
 {
     auto conn = store.openConnectionWrapper();
-    int from = conn->from.fd;
-    int to = conn->to.fd;
+    int from = conn->fromFd();
+    int to = conn->toFd();
 
     while (true) {
         struct pollfd pfds[2];

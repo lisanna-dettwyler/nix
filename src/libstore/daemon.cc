@@ -1180,10 +1180,10 @@ void processConnection(
     if (conn.protoVersion.features.contains(WorkerProto::featureOpenTelemetry))
         traceparent = readString(from);
 
-    conn.to = std::move(to);
-    conn.from = std::move(from);
+    conn.toFd = std::move(to);
+    conn.fromFd = std::move(from);
 
-    auto tunnelLogger = new TunnelLogger(conn.to, conn.protoVersion);
+    auto tunnelLogger = new TunnelLogger(conn.toFd, conn.protoVersion);
     auto prevLogger = logger;
     // FIXME
     if (!recursive) {

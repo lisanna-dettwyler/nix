@@ -43,6 +43,8 @@ WorkerProto::BasicClientConnection::processStderrReturn(Sink * sink, Source * so
 
     std::exception_ptr ex;
 
+    auto & msgLogger = messageLogger ? *messageLogger : *logger;
+
     while (true) {
 
         if (!block && !from.hasData())
@@ -78,7 +80,7 @@ WorkerProto::BasicClientConnection::processStderrReturn(Sink * sink, Source * so
         }
 
         else if (msg == STDERR_NEXT)
-            printError(chomp(readString(from)));
+            msgLogger.log(lvlError, chomp(readString(from)));
 
         else if (msg == STDERR_START_ACTIVITY) {
             auto act = readNum<ActivityId>(from);
@@ -88,7 +90,7 @@ WorkerProto::BasicClientConnection::processStderrReturn(Sink * sink, Source * so
             auto fields = readFields(from);
             auto parent = readNum<ActivityId>(from);
             RemoteLogSource remoteLogSource;
-            logger->startActivity(act, lvl, type, s, fields, parent);
+            msgLogger.startActivity(act, lvl, type, s, fields, parent);
         }
 
         else if (msg == STDERR_START_ACTIVITY_STRINGLY) {
@@ -105,13 +107,13 @@ WorkerProto::BasicClientConnection::processStderrReturn(Sink * sink, Source * so
             auto parent = readNum<ActivityId>(from);
             RemoteLogSource remoteLogSource;
             std::vector<std::pair<std::string_view, Logger::Field>> metadataRefs(metadata.begin(), metadata.end());
-            logger->startActivity(act, lvl, name, metadataRefs, s, parent);
+            msgLogger.startActivity(act, lvl, name, metadataRefs, s, parent);
         }
 
         else if (msg == STDERR_STOP_ACTIVITY) {
             auto act = readNum<ActivityId>(from);
             RemoteLogSource remoteLogSource;
-            logger->stopActivity(act);
+            msgLogger.stopActivity(act);
         }
 
         else if (msg == STDERR_RESULT) {
@@ -119,7 +121,7 @@ WorkerProto::BasicClientConnection::processStderrReturn(Sink * sink, Source * so
             auto type = (ResultType) readInt(from);
             auto fields = readFields(from);
             RemoteLogSource remoteLogSource;
-            logger->result(act, type, fields);
+            msgLogger.result(act, type, fields);
         }
 
         else if (msg == STDERR_LAST) {

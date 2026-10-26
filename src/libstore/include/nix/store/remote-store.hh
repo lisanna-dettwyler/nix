@@ -163,6 +163,7 @@ public:
      */
     void shutdownConnections();
 
+    struct ConnectionStreams;
     struct Connection;
 
     ref<Connection> openConnectionWrapper();
