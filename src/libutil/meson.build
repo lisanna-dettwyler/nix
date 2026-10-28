@@ -183,6 +183,7 @@ sources = [ config_priv_h ] + files(
   'posix-source-accessor.cc',
   'processes.cc',
   'provenance.cc',
+  'serialise-async.cc',
   'serialise.cc',
   'signature/local-keys.cc',
   'signature/signer.cc',

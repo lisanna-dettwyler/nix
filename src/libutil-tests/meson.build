@@ -91,7 +91,6 @@ sources = files(
   'position.cc',
   'processes.cc',
   'ref.cc',
-  'serialise-async.cc',
   'serialise.cc',
   'sort.cc',
   'source-accessor.cc',
@@ -112,10 +111,16 @@ endif
 
 if host_machine.system() != 'windows'
   subdir('unix')
+  # Uses POSIX pipes.
+  sources += files('serialise-async.cc')
 endif
 
 include_dirs = [ include_directories('.') ]
 
+# `serialise-async.cc` runs stackful coroutines. Boost is not in
+# the `nix-util` pkg-config file, so link Boost.Context here.
+boost_context = dependency('boost', modules : [ 'context' ], include_type : 'system')
+deps_other += boost_context
 
 this_exe = executable(
   meson.project_name(),
