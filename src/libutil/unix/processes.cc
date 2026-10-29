@@ -97,6 +97,7 @@ int Pid::kill(bool allowInterrupts)
        -1 when the child has exited. */
     pid_t target = separatePG ? -pid : pid;
 
+    /* By value: `wait` sets `pid` to -1, and a late SIGKILL to -1 would hit every process. */
     if (killTimeout > 0ms && killSignal != SIGKILL)
         killThread = std::thread([&, target]() {
             auto elapsed = 0ms;
@@ -106,7 +107,8 @@ int Pid::kill(bool allowInterrupts)
                 if (killed)
                     return;
             }
-            ::kill(target, SIGKILL);
+            if (!killed)
+                ::kill(target, SIGKILL);
         });
 
     /* Send the requested signal to the child.  If it has its own
