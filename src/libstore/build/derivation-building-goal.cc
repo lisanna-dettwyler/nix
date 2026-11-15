@@ -6,10 +6,12 @@
 #  include "nix/store/build/hook-instance.hh"
 #  include "nix/store/build/derivation-builder.hh"
 #  include "nix/store/build/remote-machine-build.hh"
+#  include "nix/util/coroutine-gc.hh"
+#  include "nix/util/serialise-async.hh"
+#  include <boost/asio/any_io_executor.hpp>
 #  include <boost/asio/bind_cancellation_slot.hpp>
 #  include <boost/asio/cancellation_signal.hpp>
 #  include <boost/asio/spawn.hpp>
-#  include <boost/context/protected_fixedsize_stack.hpp>
 #endif
 #include "nix/util/fun.hh"
 #include "nix/util/processes.hh"
@@ -1694,6 +1696,7 @@ Goal::Co DerivationBuildingGoal::buildRemotely(
         std::exception_ptr error;
         asio::cancellation_signal cancel;
         std::string machine;
+        std::shared_ptr<GcFiberStack> fiberStack;
     };
 
     auto state = std::make_shared<State>();
@@ -1722,18 +1725,34 @@ Goal::Co DerivationBuildingGoal::buildRemotely(
     /* Boost's default stack is too small for SQLite, NAR hashing and log compression. */
     static constexpr size_t remoteBuildStackSize = 8 * 1024 * 1024;
 
+    /* The coroutine runs libutil coroutines (`copyStorePath`'s
+       `sinkToSource`) on its own stack, so the conservative GC of the
+       evaluator must know about that stack: it is registered on
+       allocation, every resumption goes through `GcFiberExecutor`, and
+       every `yield` sits in a `GcYieldScope`. Kept alive by `state`,
+       since asio hands the stack back while it is still the GC's
+       current one. */
+    auto fiberStack = std::make_shared<GcFiberStack>(remoteBuildStackSize);
+    state->fiberStack = fiberStack;
+    asio::any_io_executor fiberExecutor(
+        GcFiberExecutor<asio::io_context::executor_type>{worker.ioContext.get_executor(), fiberStack});
+
     /* Keep this goal's activity in case `spawn` runs the coroutine here rather than queueing it. */
     PushActivity keepActivity(getCurActivity());
 
     asio::spawn(
-        worker.ioContext,
+        fiberExecutor,
         std::allocator_arg,
-        boost::context::protected_fixedsize_stack(remoteBuildStackSize),
+        GcFiberStackAllocator{fiberStack},
         [&store = worker.store,
          &machines = worker.remoteMachines(),
          &ctx = worker.ioContext,
          request,
+         fiberStack,
          machine = std::move(machine)](asio::yield_context yield) mutable -> RemoteMachineBuildOutcome {
+            /* Now on the coroutine's own stack. */
+            if (coroEnter)
+                coroEnter(fiberStack->cookie);
             return buildOnRemoteMachine(store, machines, std::move(machine), *request, ctx, yield);
         },
         asio::bind_cancellation_slot(

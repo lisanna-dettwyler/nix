@@ -62,6 +62,7 @@ acquireUploadLock(Descriptor lock, std::string_view storeUri, asio::io_context &
         boost::system::error_code ec;
         {
             SuspendedActivity suspended;
+            GcYieldScope gcYield;
             timer.async_wait(yield[ec]);
         }
         if (ec)
