@@ -2,6 +2,7 @@
 ///@file
 
 #include "nix/util/error.hh"
+#include "nix/util/source-accessor.hh"
 #include "nix/util/terminal.hh"
 #include <gmock/gmock.h>
 
@@ -64,6 +65,29 @@ HasSubstrIgnoreANSIMatcher(const std::string & substring)
 inline auto ThrowsSysError(int expected)
 {
     return ::testing::Throws<SysError>(::testing::Field(&SysError::errNo, expected));
+}
+
+/**
+ * Matches a (pointer to a) `SourceAccessor` that has a regular file at
+ * `path` with contents `expected`.
+ */
+MATCHER_P2(HasContents, path, expected, "")
+{
+    auto stat = arg->maybeLstat(path);
+    if (!stat) {
+        *result_listener << arg->showPath(path) << " does not exist";
+        return false;
+    }
+    if (stat->type != SourceAccessor::tRegular) {
+        *result_listener << arg->showPath(path) << " is not a regular file";
+        return false;
+    }
+    auto actual = arg->readFile(path);
+    if (actual != expected) {
+        *result_listener << arg->showPath(path) << " has contents " << ::testing::PrintToString(actual);
+        return false;
+    }
+    return true;
 }
 
 } // namespace nix::testing

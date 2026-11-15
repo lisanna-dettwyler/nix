@@ -1315,7 +1315,7 @@ void LocalStore::addMultipleToStore(
         /* Lock the output path. But don't lock if we're being called
            from a build hook (whose parent process already acquired a
            lock on this path). */
-        if (!locksHeld.count(printStorePath(info.path)))
+        if (!locksHeld.lock()->count(printStorePath(info.path)))
             pathsToLock.insert(toRealPath(info.path));
     }
 

@@ -27,7 +27,7 @@ expr='
   derivation {
     name = "build-remote-inprocess";
     inherit system;
-    builder = "'"$busybox"'";
+    builder = '"$busybox"';
     args = [ "sh" "-e" "-c" "echo hi-inprocess; echo FOO > $out" ];
   }
 '

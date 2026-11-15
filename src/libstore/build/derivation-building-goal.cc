@@ -1273,9 +1273,10 @@ Goal::Co DerivationBuildingGoal::tryBuildHook(const DerivationOptions<StorePath>
 
     /* This should use `worker.evalStore`, but per #13179 the build hook
        doesn't work with eval store anyways. */
-    if (worker.settings.buildHook.get().empty() || !worker.tryBuildHook || !worker.store.isValidPath(drvPath))
+    if (worker.settings.buildHook.get().empty() || !worker.tryBuildHook || !worker.store.isValidPath(drvPath)) {
         hookReply = rpDecline;
         co_return Return{};
+    }
 
     std::unique_ptr<HookInstance> hook = std::move(worker.hook);
     if (!hook)

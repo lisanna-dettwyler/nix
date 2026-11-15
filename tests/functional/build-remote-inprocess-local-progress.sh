@@ -74,7 +74,7 @@ NIX
 machine="ssh-ng://localhost?remote-store=$TEST_ROOT/machine1?system-features=remote-only - - 1 1 remote-only"
 
 outPath=$(timeout 240 nix-build "$TEST_ROOT/local-progress.nix" \
-  --argstr configNix "$config_nix" --argstr sync "$sync" --argstr busybox "$busybox" \
+  --argstr configNix "$config_nix" --argstr sync "$sync" --arg busybox "$busybox" \
   --store "$TEST_ROOT/machine0" --builders "$machine" --max-jobs 1 \
   --no-out-link -vvv 2> "$log")
 
